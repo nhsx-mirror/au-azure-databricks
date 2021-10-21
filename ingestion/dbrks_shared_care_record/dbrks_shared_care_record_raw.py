@@ -80,34 +80,37 @@ config_JSON = json.loads(io.BytesIO(config_JSON).read())
 # COMMAND ----------
 
 file_system = "nhsxdatalakesagen2fsprod"
-ods_table_path = "proc/projects/reference_tables/ods_codes/gp_mapping/"
+ods_stp_pop_path = "proc/sources/ncdr_etp/adf_v2/table/gp_population_ics_stp/snapshot/"
+ods_stp_pop_file = "table_gp_population_ics_stp_snapshot.csv"
+ods_table_path = "proc/sources/ncdr_etp/adf_v2/table/odscodes/gp_mapping/"
 ods_table_file = "table_odscodes_gp_mapping.parquet"
 
+
 # COMMAND ----------
 
-# Ingest ODS Code table 
+# Ingest STP population table and ODS table
 # -------------------------------------------------------------------------
-latestFolder = datalake_latestFolder(CONNECTION_STRING, file_system, ods_table_path)
-file = datalake_download(CONNECTION_STRING, file_system, ods_table_path+latestFolder, ods_table_file)
-df_ods = pd.read_parquet(io.BytesIO(file), engine="pyarrow")
+latestFolder = datalake_latestFolder(CONNECTION_STRING, file_system, ods_stp_pop_path)
+stp_pop_file = datalake_download(CONNECTION_STRING, file_system, ods_stp_pop_path+latestFolder, ods_stp_pop_file)
+df_stp_ods = pd.read_csv(io.BytesIO(stp_pop_file))
 
-# COMMAND ----------
-
-df_ods
-
-# COMMAND ----------
-
-
+latestFolder_1 = datalake_latestFolder(CONNECTION_STRING, file_system, ods_table_path)
+ods_file = datalake_download(CONNECTION_STRING, file_system, ods_table_path+latestFolder_1, ods_table_file)
+df_ods_table = pd.read_parquet(io.BytesIO(ods_file), engine = 'pyarrow')
 
 # ODS Code STP table 
 # -------------------------------------------------------------------------
-df_STP = df[["PCN_STP_Code", "PCN_STP_Name"]].drop_duplicates().reset_index(drop = True)
-df_STP_1 = df_STP.rename(columns = {'PCN_STP_Code': 'ODS STP code', 'PCN_STP_Name' : 'STP name'})
-df_STP_1
+df_stp_ods_1 = df_stp_ods[["Org_Code", "ONS_Code"]].reset_index(drop = True)
+df_stp_ods_2 = df_stp_ods_1.rename(columns = {'Org_Code': 'ODS STP code', 'ONS_Code' : 'ONS STP code'})
+df_ods_table_stp = df_ods_table[["GP_STP_Code", "GP_STP_Name"]].drop_duplicates().reset_index(drop = True)
+df_ods_table_stp_1 = df_ods_table_stp.rename(columns = {'GP_STP_Code': 'ODS STP code', 'GP_STP_Name' : 'STP name'})
+df_ods_table_stp_2 = df_stp_ods_2.merge(df_ods_table_stp_1, left_on='ODS STP code', right_on='ODS STP code')
 
 # COMMAND ----------
 
-source_path = 'land/sharepoint/Shared Documents/nhsx_au_ingestion/shcr/timestamp/xlsx/all_tables/2021-06-01/'
+# Ingest STP ShCR data
+# -------------------------------------------------------------------------
+source_path = 'land/sharepoint/Shared Documents/nhsx_au_ingestion/shcr/timestamp/xlsx/all_tables/2021-09-01/'
 STP_file_name_list = datalake_listContents(CONNECTION_STRING, file_system, source_path)
 file_types = ['.xlsx', '.XLSX']
 STP_file_name_list_1 = [x for x in STP_file_name_list if any(c in x for c in file_types)]
@@ -118,13 +121,17 @@ STP_file_name_list_1
 
 # COMMAND ----------
 
+source_path = 'land/sharepoint/Shared Documents/nhsx_au_ingestion/shcr/timestamp/xlsx/all_tables/2021-09-01/'
+STP_file_name_list = datalake_listContents(CONNECTION_STRING, file_system, source_path)
+file_types = ['.xlsx', '.XLSX']
+STP_file_name_list_1 = [x for x in STP_file_name_list if any(c in x for c in file_types)]
 df = pd.DataFrame()
 for filename in STP_file_name_list_1:
   file = datalake_download(CONNECTION_STRING, file_system, source_path, filename)
   new_df = pd.read_excel(file, sheet_name='STP', engine='openpyxl', index_col=None, header=None, skiprows=1)
   df = df.append(new_df)
 df_1 = df.rename(columns = {0: "For Month",
-                           1: "ODS STP Code",
+                           1: "ONS STP code",
                            2: "STP Name",
                            3: "ICS Name (if applicable)",
                            4: "ShCR Programme Name",
@@ -132,20 +139,24 @@ df_1 = df.rename(columns = {0: "For Month",
                            6: "Number of users with access to the ShCR",
                            7: "Number of citizen records available to users via the ShCR",
                            8: "Number of ShCR views in the past month",
-                           9: "Number of unique user ShCR views in the past month",
-                           10: "Completed by (email)",
-                           11: "Date completed:"})
-df_2 = df_1.iloc[:, :12]
+                           9: "Number of unique user ShCR views in the past month"})
+df_2 = df_1.iloc[:, :9]
+df_2 = df_2.drop(columns = ["STP Name"])
 df_3 = df_2.dropna(how = 'all').reset_index(drop = True)
 
 # COMMAND ----------
 
-df_3
+df_schr_ods = df_ods_table_stp_2.merge(df_3, left_on='ONS STP code', right_on='ONS STP code',  how='left')
+df_schr_ods['Date'] = '2021-09-01'
+df_schr_ods
 
 # COMMAND ----------
 
+historical_df1 = historical_df.append(df_schr_ods)
 
-df_2
+# COMMAND ----------
+
+historical_df1
 
 # COMMAND ----------
 
